@@ -787,11 +787,10 @@ function loadTemplate() {
 function updateReadout() {
   const designMm = contentBottom() / DOTS_PER_MM;
   const copies = Math.max(1, Math.floor(state.repeat || 1));
-  const strips = Math.max(1, Math.ceil(state.lengthDots / 400));
   els.sizeReadout.innerHTML =
     `<b>${state.widthMm} × ${state.lengthMm.toFixed(2)} mm</b> · ${state.lengthDots} dots<br>` +
     `design ${designMm.toFixed(1)} mm × ${copies} · gap ${state.gapMm} mm · extra ${state.marginMm} mm<br>` +
-    `<span style="color:#3fb950">exact mode 8 · ${strips} strip${strips === 1 ? "" : "s"} of ≤50 mm.</span>`;
+    `<span style="color:#3fb950">exact mode 8 · one job · ${state.lengthMm.toFixed(2)} mm.</span>`;
   $("undo").disabled = state.history.length < 2;
   $("redo").disabled = !state.future.length;
 }
@@ -1087,31 +1086,9 @@ function buildExactJob(canvas) {
   return out;
 }
 
-// A mode-8 strip over 50 mm overflows the printer's buffer and feeds forever.
-// Split long designs into equal strips of at most 400 dots, rebalancing so the
-// last strip never needs padding. This keeps the app-compatible exact recipe
-// for every strip, including designs longer than 50 mm.
 function buildJobs(canvas) {
-  const MAX = 400, MIN = 104;
-  if (canvas.height <= MAX) {
-    return [{ job: buildExactJob(canvas), lengthMm: canvas.height / 8 }];
-  }
-  const count = Math.ceil(canvas.height / MAX);
-  const chunk = Math.ceil(canvas.height / count / 8) * 8;
-  const jobs = [];
-  for (let y = 0; y < canvas.height; y += chunk) {
-    const take = Math.min(chunk, canvas.height - y);
-    const h = Math.max(MIN, take);
-    const c = document.createElement("canvas");
-    c.width = canvas.width;
-    c.height = h;
-    const ctx = c.getContext("2d");
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, c.width, c.height);
-    ctx.drawImage(canvas, 0, y, canvas.width, take, 0, 0, canvas.width, take);
-    jobs.push({ job: buildExactJob(c), lengthMm: h / 8 });
-  }
-  return jobs;
+  // One exact mode-8 job at any length. No upper cap and no splitting.
+  return [{ job: buildExactJob(canvas), lengthMm: canvas.height / 8 }];
 }
 
 async function printLabel() {
@@ -1121,22 +1098,12 @@ async function printLabel() {
     return toast("The print head is 384 dots (48 mm). Reduce “Head dots”.", 5000);
   }
   const canvas = renderPrintCanvas();
-  const jobs = buildJobs(canvas);
-  const totalBytes = jobs.reduce((n, j) => n + j.job.length, 0);
-  const totalMm = jobs.reduce((n, j) => n + j.lengthMm, 0);
-  const combined = new Uint8Array(totalBytes);
-  let off = 0;
-  for (const { job } of jobs) {
-    combined.set(job, off);
-    off += job.length;
-  }
+  const job = buildExactJob(canvas);
   els.print.disabled = true;
-  toast(jobs.length > 1 ? `Printing ${jobs.length} strips…` : "Printing…", 60000);
+  toast("Printing…", 60000);
   try {
-    // One continuous stream: opening a second Web Serial job while the first
-    // is still feeding makes some units drop the second strip.
-    await state.transport.print(combined, totalMm);
-    toast(jobs.length > 1 ? `Printed ${jobs.length} strips` : "Printed");
+    await state.transport.print(job, canvas.height / 8);
+    toast("Printed");
   } catch (e) {
     toast("Print failed: " + (e.message || e), 5000);
   } finally {
@@ -1152,17 +1119,14 @@ function showPreview() {
   pv.height = c.height;
   pv.getContext("2d").drawImage(c, 0, 0);
   const copies = Math.max(1, Math.floor(state.repeat || 1));
-  const jobs = buildJobs(c);
-  const first = jobs[0].job;
-  const totalBytes = jobs.reduce((n, j) => n + j.job.length, 0);
-  const raw = new TextDecoder("ascii").decode(first.slice(0, 240));
+  const job = buildExactJob(c);
+  const raw = new TextDecoder("ascii").decode(job.slice(0, 240));
   const bitmapAt = raw.indexOf("BITMAP");
   const head = bitmapAt >= 0 ? raw.slice(0, bitmapAt + 24) : raw;
   $("previewInfo").textContent =
     `${c.width}×${c.height} dots · SIZE ${state.widthMm} × ${state.lengthMm.toFixed(2)} mm · ` +
     `${copies} cop${copies === 1 ? "y" : "ies"}\n` +
-    `path: exact mode 8 / 4bpp · ${jobs.length} strip${jobs.length === 1 ? "" : "s"} · ` +
-    `${totalBytes} bytes\n` +
+    `path: exact mode 8 / 4bpp · ${job.length} bytes\n` +
     head.replace(/[^\x20-\x7e\r\n]/g, "·");
   $("previewModal").classList.remove("hidden");
 }

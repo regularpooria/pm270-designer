@@ -53,14 +53,10 @@ SAFE_CONTENT_MM = 30.0
 # Short labels below 0.5 in (13 mm / 104 dots) make the firmware feed an extra
 # ~0.5 in after the image with the head still on, which prints a black bar.
 MIN_SHORT_ROWS = 104
-# 50 mm is the largest 4 bpp image this firmware buffers safely. A 60 mm mode-8
-# job (92 KB) runs away and feeds until power-off.
-MAX_SHORT_ROWS = 400
-
 __all__ = [
     "PM270", "build_image_job", "build_short_job", "pack_4bpp",
     "job_length_mm", "DEFAULT_ADDRESS", "CHANNEL", "DPI",
-    "MIN_SHORT_ROWS", "MAX_SHORT_ROWS",
+    "MIN_SHORT_ROWS",
 ]
 
 SERVICE_FF00 = "0000ff00-0000-1000-8000-00805f9b34fb"
@@ -110,14 +106,14 @@ _pack_4bpp = pack_4bpp
 
 def build_short_job(canvas, width_mm: float, density: int = 15,
                     copies: int = 1) -> bytes:
-    """Build the exact <50 mm job shape captured from the Nelko iOS app.
+    """Build the exact job shape captured from the Nelko iOS app.
 
     `canvas` must be a PIL 'L' image whose width is a multiple of 8 and <= 384
     dots, and at least 104 rows (13 mm). Its height (in dots) becomes the label
-    length. The app sends PRINT *before* BITMAP; this ordering is required, and
-    labels shorter than 13 mm get a black bar during feed-out. `SIZE` and the
-    bitmap height always come from the same dot count, so the firmware cannot
-    swallow the trailing CRLF as image data.
+    length (no upper cap). The app sends PRINT *before* BITMAP; this ordering
+    is required, and labels shorter than 13 mm get a black bar during feed-out.
+    `SIZE` and the bitmap height always come from the same dot count, so the
+    firmware cannot swallow the trailing CRLF as image data.
     """
 
     w, h = canvas.size
@@ -127,11 +123,6 @@ def build_short_job(canvas, width_mm: float, density: int = 15,
         raise ValueError(
             f"short job must be at least {MIN_SHORT_ROWS} rows (13 mm); "
             "shorter labels get a black post-feed bar"
-        )
-    if h > MAX_SHORT_ROWS:
-        raise ValueError(
-            f"short job is limited to {MAX_SHORT_ROWS} rows (50 mm); "
-            "a larger 4 bpp image overflows the firmware buffer and runs away"
         )
     wbytes = w // 8
     length_mm = h / 8.0          # firmware's nominal 8 dots/mm
@@ -160,7 +151,7 @@ def build_image_job(src, *, width_mm: float = 54.0, width_dots: int = 384,
                     gap_mm: float = 0.0, feed_margin_mm: float | None = None,
                     threshold: int = 128, invert: bool = False,
                     copies: int = 1, short: bool = False,
-                    max_short_mm: float = 50.0) -> bytes:
+                    max_short_mm: float | None = None) -> bytes:
     """Rasterise an image and return the complete TSPL job bytes.
 
     This is the hardware-free half of the API: `src` may be a path or a PIL
@@ -186,18 +177,23 @@ def build_image_job(src, *, width_mm: float = 54.0, width_dots: int = 384,
         image = ImageOps.invert(image)
 
     if short:
-        max_rows = min(MAX_SHORT_ROWS,
-                       max(MIN_SHORT_ROWS, int(round(max_short_mm * 8))))
         margin_rows = max(0, round(feed_margin_mm * 8))
-        avail_rows = max(1, max_rows - margin_rows)
-        scale = min(width_dots / image.width, avail_rows / image.height)
+        if max_short_mm:
+            max_rows = max(MIN_SHORT_ROWS, int(round(max_short_mm * 8)))
+            avail_rows = max(1, max_rows - margin_rows)
+            scale = min(width_dots / image.width, avail_rows / image.height)
+        else:
+            max_rows = None
+            scale = width_dots / image.width
         w = max(1, round(image.width * scale))
         h = max(1, round(image.height * scale))
         image = image.resize((w, h), Image.LANCZOS)
 
         # Round up to a whole millimetre (8 dots) and never go below
         # 13 mm: below 0.5 in the printer burns a bar during feed-out.
-        rows = min(max_rows, max(MIN_SHORT_ROWS, -(-(h + margin_rows) // 8) * 8))
+        rows = max(MIN_SHORT_ROWS, -(-(h + margin_rows) // 8) * 8)
+        if max_rows is not None:
+            rows = min(max_rows, rows)
         canvas = Image.new("L", (width_dots, rows), 255)
         canvas.paste(image, ((width_dots - w) // 2, 0))
         return build_short_job(canvas, width_mm, density, copies)
@@ -406,11 +402,11 @@ class PM270:
                     feed_margin_mm: float | None = None,
                     threshold: int = 128, invert: bool = False,
                     copies: int = 1, hold: float | None = None,
-                    short: bool = False, max_short_mm: float = 50.0) -> bytes:
+                    short: bool = False, max_short_mm: float | None = None) -> bytes:
         """Build and send one image job; returns the job bytes.
 
         See `build_image_job` for the rasteriser and `build_short_job` for the
-        app-compatible 13-50 mm path. `hold` defaults to an estimate from SIZE.
+        app-compatible exact path. `hold` defaults to an estimate from SIZE.
         """
         job = build_image_job(
             path, width_mm=width_mm, width_dots=width_dots,
@@ -451,9 +447,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--copies", type=int, default=1)
     p.add_argument("--invert", action="store_true")
     p.add_argument("--short", action="store_true",
-                   help="exact length 13-50 mm; uses the Nelko app's mode-8 job shape")
-    p.add_argument("--max-short-mm", type=float, default=50.0,
-                   help="scale content to fit this length in --short mode (default 50)")
+                   help="exact length (min 13 mm, no max); uses the app's mode-8 job shape")
+    p.add_argument("--max-short-mm", type=float, default=0.0,
+                   help="optional cap for --short; 0 = no cap")
 
     r = sub.add_parser("raw")
     r.add_argument("hex", help="hex bytes to send, e.g. 1b213f0d0a")

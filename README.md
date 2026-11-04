@@ -80,7 +80,7 @@ mobile app, not the firmware.
 /usr/bin/python3 pm270.py tag
 /usr/bin/python3 pm270.py selftest
 /usr/bin/python3 pm270.py print-image test.png --width-mm 54 --density 15
-/usr/bin/python3 pm270.py print-image label.png --short   # exact 13-50 mm, mode 8
+/usr/bin/python3 pm270.py print-image label.png --short   # exact 13 mm+, mode 8
 /usr/bin/python3 pm270.py raw "1b213f0d0a"
 ```
 
@@ -138,10 +138,9 @@ bar at the bottom. Using one dot count for both removes the mismatch.
 
 The extra margin defaults to **0** (pure content length). The 400-dot / 50 mm
 floor remains because shorter `SIZE` values can make this firmware hunt for a
-gap. A 60 mm **classic 1 bpp** job printed once and stopped cleanly; a 60 mm
-**mode-8** job does not (see below).
+gap.
 
-### Short labels: 13–50 mm (captured app job)
+### Exact labels: 13 mm+ (captured app job)
 
 The app prints short strips using a different bitmap mode. The captured job is:
 
@@ -168,11 +167,10 @@ BITMAP 0,0,48,<rows>,8,<4 bpp payload>
   extra ~0.5 in after the image with the head still on, which prints a black
   bar. The app's captured 11 mm job is below this limit and can show the bar;
   the scripts pad shorter artwork up to 13 mm with white rows.
-- **Maximum 50 mm per strip.** A single mode-8 strip over 50 mm (92 KB at
-  60 mm) overflows the firmware buffer and feeds until power-off. The designer
-  splits longer artwork into equal strips of at most 50 mm and prints them
-  back-to-back. The last two dot rows of each strip are forced white so a dark
-  bottom edge cannot burn a bar during feed-out.
+- **No upper cap.** The app's captured 52 mm job is a single 421-row mode-8
+  strip (80.8 KB) and prints fine; the designer sends one exact job at any
+  length. The last two dot rows are forced white so a dark bottom edge cannot
+  burn a bar during feed-out.
 
 The designer always uses this shape. The CLI equivalent is:
 
@@ -180,10 +178,9 @@ The designer always uses this shape. The CLI equivalent is:
 /usr/bin/python3 pm270.py print-image label.png --short
 ```
 
-`--short` scales the artwork into 384 dots (48 mm), pads to at least 13 mm, and
-caps the feed at 50 mm. For longer labels, use the classic 50 mm path or split
-the artwork. The tear bar is 35–40 mm from the head, so a short label may still
-need one press of Feed.
+`--short` scales the artwork into 384 dots (48 mm) and pads to at least 13 mm;
+there is no upper length cap. The tear bar is 35–40 mm from the head, so a
+short label may still need one press of Feed.
 
 A safe alternative for many small labels is still to pack several short labels
 into one 50 mm strip, then cut between them.
@@ -264,9 +261,7 @@ Features: text, boxes, lines, images, Code128/Code39/EAN/UPC/ITF barcodes, QR
 codes, drag/resize, layer ordering, undo/redo, template save/load, and
 **automatic label length** (exact content height in dots, plus an optional extra
 margin). Printing always uses the app-compatible **mode 8 / 4 bpp** job with
-`PRINT` before `BITMAP`; labels longer than 50 mm are split into equal strips of
-at most 50 mm and sent as one continuous stream, because a single mode-8 strip
-over 50 mm overflows the firmware buffer and feeds forever. Enable **Dither
+`PRINT` before `BITMAP`, as one job with no upper length cap. Enable **Dither
 photos** for grayscale images; leave it off for crisp text and barcodes.
 
 The editor canvas is 1:1 dots (384 wide) and scales down to fit the screen; the
@@ -349,7 +344,7 @@ tests/test_api.py            hardware-free API tests
 bridge.py                    optional local HTTP helper (designer does not use it)
 web/designer.html            standalone label designer
 web/designer.css             designer styles
-web/designer.js              canvas editor, auto-length, Web Serial, exact/split jobs
+web/designer.js              canvas editor, auto-length, Web Serial, exact jobs
 web/vendor/                  JsBarcode (MIT) + qrcode-generator (MIT)
 web/app.html                 legacy bridge-backed print UI
 web/index.html               standalone BLE probe

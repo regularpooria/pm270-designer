@@ -34,13 +34,10 @@ def test_short_job_rejects_tiny_canvas():
         raise AssertionError("expected ValueError for an 11 mm short job")
 
 
-def test_short_job_rejects_over_50mm():
-    try:
-        pm270.build_short_job(Image.new("L", (384, 480), 255), 54)
-    except ValueError as e:
-        assert "50 mm" in str(e)
-    else:
-        raise AssertionError("expected ValueError for a 60 mm mode-8 job")
+def test_exact_job_has_no_upper_cap():
+    job = pm270.build_image_job(Image.new("L", (384, 480), 255), short=True)
+    assert b"SIZE 54 mm,60 mm\r\n" in job
+    assert b"BITMAP 0,0,48,480,8," in job
 
 
 def test_4bpp_packing_is_high_nibble_first_and_white_high():
