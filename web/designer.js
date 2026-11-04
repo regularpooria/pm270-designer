@@ -1122,12 +1122,20 @@ async function printLabel() {
   }
   const canvas = renderPrintCanvas();
   const jobs = buildJobs(canvas);
+  const totalBytes = jobs.reduce((n, j) => n + j.job.length, 0);
+  const totalMm = jobs.reduce((n, j) => n + j.lengthMm, 0);
+  const combined = new Uint8Array(totalBytes);
+  let off = 0;
+  for (const { job } of jobs) {
+    combined.set(job, off);
+    off += job.length;
+  }
   els.print.disabled = true;
   toast(jobs.length > 1 ? `Printing ${jobs.length} strips…` : "Printing…", 60000);
   try {
-    for (const { job, lengthMm } of jobs) {
-      await state.transport.print(job, lengthMm);
-    }
+    // One continuous stream: opening a second Web Serial job while the first
+    // is still feeding makes some units drop the second strip.
+    await state.transport.print(combined, totalMm);
     toast(jobs.length > 1 ? `Printed ${jobs.length} strips` : "Printed");
   } catch (e) {
     toast("Print failed: " + (e.message || e), 5000);

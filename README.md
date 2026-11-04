@@ -265,9 +265,9 @@ codes, drag/resize, layer ordering, undo/redo, template save/load, and
 **automatic label length** (exact content height in dots, plus an optional extra
 margin). Printing always uses the app-compatible **mode 8 / 4 bpp** job with
 `PRINT` before `BITMAP`; labels longer than 50 mm are split into equal strips of
-at most 50 mm, because a single mode-8 strip over 50 mm overflows the firmware
-buffer and feeds forever. Enable **Dither photos** for grayscale images; leave
-it off for crisp text and barcodes.
+at most 50 mm and sent as one continuous stream, because a single mode-8 strip
+over 50 mm overflows the firmware buffer and feeds forever. Enable **Dither
+photos** for grayscale images; leave it off for crisp text and barcodes.
 
 The editor canvas is 1:1 dots (384 wide) and scales down to fit the screen; the
 red dashed line marks the bottom margin. Only the objects print — guides and
