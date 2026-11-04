@@ -168,12 +168,12 @@ BITMAP 0,0,48,<rows>,8,<4 bpp payload>
   bar. The app's captured 11 mm job is below this limit and can show the bar;
   the scripts pad shorter artwork up to 13 mm with white rows.
 - **No upper length cap.** The app's captured 52 mm job is a single 421-row
-  mode-8 strip (80.8 KB) and prints fine, so exact mode-8 is used up to 53 mm
-  (424 dots). Longer labels use the original classic 1 bpp job, which is the
+  mode-8 strip (80.8 KB) and prints fine, so exact mode-8 is used up to 50 mm
+  (400 dots). Longer labels use the original classic 1 bpp job, which is the
   path that printed long artwork reliably before. The last two dot rows are
   forced white so a dark bottom edge cannot burn a bar during feed-out.
 
-The designer uses this shape up to 53 mm and classic 1 bpp above that. The CLI
+The designer uses this shape up to 50 mm and classic 1 bpp above that. The CLI
 equivalent for the exact path is:
 
 ```bash
@@ -263,7 +263,7 @@ Features: text, boxes, lines, images, Code128/Code39/EAN/UPC/ITF barcodes, QR
 codes, drag/resize, layer ordering, undo/redo, template save/load, and
 **automatic label length** (exact content height in dots, plus an optional extra
 margin). Printing uses the app-compatible **mode 8 / 4 bpp** job with `PRINT`
-before `BITMAP` up to 53 mm (424 dots); longer artwork falls back to the
+before `BITMAP` up to 50 mm (400 dots); longer artwork falls back to the
 original classic 1 bpp job. There is no length cap and no splitting. Enable
 **Dither photos** for grayscale images; leave it off for crisp text and
 barcodes.

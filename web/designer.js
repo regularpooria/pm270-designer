@@ -787,7 +787,7 @@ function loadTemplate() {
 function updateReadout() {
   const designMm = contentBottom() / DOTS_PER_MM;
   const copies = Math.max(1, Math.floor(state.repeat || 1));
-  const mode = state.lengthDots <= 424 ? "exact mode 8 / 4bpp" : "classic 1bpp";
+  const mode = state.lengthDots <= EXACT_MAX_ROWS ? "exact mode 8 / 4bpp" : "classic 1bpp";
   els.sizeReadout.innerHTML =
     `<b>${state.widthMm} × ${state.lengthMm.toFixed(2)} mm</b> · ${state.lengthDots} dots<br>` +
     `design ${designMm.toFixed(1)} mm × ${copies} · gap ${state.gapMm} mm · extra ${state.marginMm} mm<br>` +
@@ -1105,9 +1105,9 @@ function buildClassicJob(canvas) {
 }
 
 // The app's captured 52 mm mode-8 job works, but the original 1 bpp path is
-// what printed long labels reliably. Use exact mode 8 up to 53 mm (424 dots)
+// what printed long labels reliably. Use exact mode 8 up to 50 mm (400 dots)
 // and fall back to the classic 1 bpp job above that. No length cap, no split.
-const EXACT_MAX_ROWS = 424;
+const EXACT_MAX_ROWS = 400;
 
 function buildJob(canvas) {
   return canvas.height <= EXACT_MAX_ROWS ? buildExactJob(canvas) : buildClassicJob(canvas);
