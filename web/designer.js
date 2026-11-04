@@ -787,10 +787,11 @@ function loadTemplate() {
 function updateReadout() {
   const designMm = contentBottom() / DOTS_PER_MM;
   const copies = Math.max(1, Math.floor(state.repeat || 1));
+  const mode = state.lengthDots <= 424 ? "exact mode 8 / 4bpp" : "classic 1bpp";
   els.sizeReadout.innerHTML =
     `<b>${state.widthMm} × ${state.lengthMm.toFixed(2)} mm</b> · ${state.lengthDots} dots<br>` +
     `design ${designMm.toFixed(1)} mm × ${copies} · gap ${state.gapMm} mm · extra ${state.marginMm} mm<br>` +
-    `<span style="color:#3fb950">exact mode 8 · one job · ${state.lengthMm.toFixed(2)} mm.</span>`;
+    `<span style="color:#3fb950">${mode} · one job · ${state.lengthMm.toFixed(2)} mm.</span>`;
   $("undo").disabled = state.history.length < 2;
   $("redo").disabled = !state.future.length;
 }
@@ -1086,9 +1087,32 @@ function buildExactJob(canvas) {
   return out;
 }
 
-function buildJobs(canvas) {
-  // One exact mode-8 job at any length. No upper cap and no splitting.
-  return [{ job: buildExactJob(canvas), lengthMm: canvas.height / 8 }];
+function buildClassicJob(canvas) {
+  const enc = new TextEncoder();
+  const { raw, wbytes, h } = packCanvas(canvas);
+  const head = enc.encode(
+    `\r\nSIZE ${state.widthMm} mm,${state.lengthMm.toFixed(4)} mm\r\n` +
+    `GAP 0 mm,0 mm\r\n` +
+    `DIRECTION 0,0\r\n` +
+    `DENSITY ${state.density}\r\n` +
+    `CLS\r\n` +
+    `BITMAP 0,0,${wbytes},${h},0,`
+  );
+  const tail = enc.encode(`\r\nPRINT 1,1\r\n`);
+  const out = new Uint8Array(head.length + raw.length + tail.length);
+  out.set(head, 0);
+  out.set(raw, head.length);
+  out.set(tail, head.length + raw.length);
+  return out;
+}
+
+// The app's captured 52 mm mode-8 job works, but the original 1 bpp path is
+// what printed long labels reliably. Use exact mode 8 up to 53 mm (424 dots)
+// and fall back to the classic 1 bpp job above that. No length cap, no split.
+const EXACT_MAX_ROWS = 424;
+
+function buildJob(canvas) {
+  return canvas.height <= EXACT_MAX_ROWS ? buildExactJob(canvas) : buildClassicJob(canvas);
 }
 
 async function printLabel() {
@@ -1098,7 +1122,7 @@ async function printLabel() {
     return toast("The print head is 384 dots (48 mm). Reduce “Head dots”.", 5000);
   }
   const canvas = renderPrintCanvas();
-  const job = buildExactJob(canvas);
+  const job = buildJob(canvas);
   els.print.disabled = true;
   toast("Printing…", 60000);
   try {
@@ -1119,14 +1143,15 @@ function showPreview() {
   pv.height = c.height;
   pv.getContext("2d").drawImage(c, 0, 0);
   const copies = Math.max(1, Math.floor(state.repeat || 1));
-  const job = buildExactJob(c);
+  const job = buildJob(c);
   const raw = new TextDecoder("ascii").decode(job.slice(0, 240));
   const bitmapAt = raw.indexOf("BITMAP");
   const head = bitmapAt >= 0 ? raw.slice(0, bitmapAt + 24) : raw;
+  const path = c.height <= EXACT_MAX_ROWS ? "exact mode 8 / 4bpp" : "classic 1bpp / mode 0";
   $("previewInfo").textContent =
     `${c.width}×${c.height} dots · SIZE ${state.widthMm} × ${state.lengthMm.toFixed(2)} mm · ` +
     `${copies} cop${copies === 1 ? "y" : "ies"}\n` +
-    `path: exact mode 8 / 4bpp · ${job.length} bytes\n` +
+    `path: ${path} · ${job.length} bytes\n` +
     head.replace(/[^\x20-\x7e\r\n]/g, "·");
   $("previewModal").classList.remove("hidden");
 }
@@ -1272,5 +1297,5 @@ document.addEventListener("keyup", (e) => {
   }
 
   // Debug/test hook.
-  window.__pm270 = { state, addType, render, buildJobs, buildExactJob, renderPrintCanvas, serialize, restore, select, showPreview };
+  window.__pm270 = { state, addType, render, buildJob, buildExactJob, renderPrintCanvas, serialize, restore, select, showPreview };
 })();
