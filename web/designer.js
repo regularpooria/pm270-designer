@@ -1041,8 +1041,6 @@ function packCanvas(canvas) {
       if (white) raw[y * wbytes + (x >> 3)] |= 0x80 >> (x & 7);
     }
   }
-  // The printer can burn the bottom edge during feed-out; keep it white.
-  raw.fill(0xff, Math.max(0, height - 2) * wbytes);
   return { raw, wbytes, h: height };
 }
 

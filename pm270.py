@@ -219,11 +219,6 @@ def build_image_job(src, *, width_mm: float = 54.0, width_dots: int = 384,
     raw = bw.tobytes()
     wbytes = bw.width // 8
     height_dots = bw.height
-    # Same feed-out guard as the 4 bpp path: keep the bottom edge white.
-    raw = bytearray(raw)
-    tail = max(0, height_dots - 2) * wbytes
-    raw[tail:] = b"\xff" * (len(raw) - tail)
-    raw = bytes(raw)
 
     job = bytearray()
     job += b"\r\n"
