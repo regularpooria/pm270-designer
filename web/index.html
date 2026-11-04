@@ -1,0 +1,376 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PM270 Web Bluetooth</title>
+<style>
+  :root { color-scheme: dark; --bg:#0e1116; --card:#171c24; --line:#2a3240;
+          --fg:#e6edf3; --muted:#8b98a9; --accent:#4da3ff; --ok:#3fb950; --err:#f85149; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:15px/1.45 system-ui,sans-serif; background:var(--bg); color:var(--fg); }
+  main { max-width: 860px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 1.4rem; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 20px; }
+  .card { background: var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; margin:14px 0; }
+  .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+  button { background:#232c38; color:var(--fg); border:1px solid var(--line); border-radius:8px;
+           padding:9px 14px; font:inherit; cursor:pointer; }
+  button:hover:not(:disabled) { border-color:var(--accent); }
+  button.primary { background:var(--accent); color:#06121f; border-color:var(--accent); font-weight:600; }
+  button:disabled { opacity:.45; cursor:not-allowed; }
+  input[type=number], input[type=text], textarea, select {
+    background:#0b0f14; color:var(--fg); border:1px solid var(--line); border-radius:8px;
+    padding:8px 10px; font:inherit; }
+  textarea { width:100%; min-height:70px; font-family:ui-monospace,monospace; font-size:13px; }
+  label { color:var(--muted); font-size:13px; display:flex; flex-direction:column; gap:4px; }
+  .dot { width:9px; height:9px; border-radius:50%; background:#555; display:inline-block; }
+  .dot.on { background:var(--ok); box-shadow:0 0 8px var(--ok); }
+  #log { font-family:ui-monospace,monospace; font-size:12px; background:#080b0f; border:1px solid var(--line);
+         border-radius:8px; padding:10px; height:220px; overflow:auto; white-space:pre-wrap; }
+  .muted { color:var(--muted); }
+  .tag { font-size:11px; color:var(--muted); border:1px solid var(--line); padding:2px 6px; border-radius:99px; }
+  canvas { max-width:100%; border:1px solid var(--line); border-radius:8px; background:#fff; }
+  .hidden { display:none; }
+  progress { width:100%; height:8px; }
+  .warn { border-left:3px solid #d29922; padding-left:12px; color:#d29922; }
+</style>
+</head>
+<body>
+<main>
+  <h1>PM270 Web Bluetooth</h1>
+  <p class="sub">Nelko PM270 / P21-family TSPL printer &mdash; BLE service <code>ff00</code></p>
+
+  <div class="card">
+    <div class="row">
+      <button id="connect" class="primary">Connect printer</button>
+      <button id="disconnect" disabled>Disconnect</button>
+      <span class="dot" id="dot"></span>
+      <span id="devname" class="muted">not connected</span>
+    </div>
+    <p class="warn" id="hint" style="margin:12px 0 0">
+      The printer only advertises BLE while no Classic/SPP link is up.
+      Close the Nelko app and disconnect it from your OS Bluetooth settings first.
+    </p>
+  </div>
+
+  <div class="card" id="queries" style="display:none">
+    <div class="row">
+      <button data-q="status">Status</button>
+      <button data-q="battery">Battery</button>
+      <button data-q="config">Config</button>
+      <button data-q="tag">Roll tag</button>
+    </div>
+    <pre id="qout" class="muted" style="margin:12px 0 0; white-space:pre-wrap"></pre>
+  </div>
+
+  <div class="card" id="printer" style="display:none">
+    <div class="row" style="margin-bottom:12px">
+      <label>Head width (dots)<input id="wdots" type="number" value="384" min="8" step="8"></label>
+      <label>Label width (mm)<input id="wmm" type="number" value="54" step="1"></label>
+      <label>Density<input id="density" type="number" value="15" min="1" max="15"></label>
+      <label>Threshold<input id="thresh" type="number" value="128" min="0" max="255"></label>
+      <label>Length mm<input id="length" type="number" value="50" min="50" step="1"></label>
+      <label>Margin mm<input id="margin" type="number" value="10" min="0" step="1"></label>
+      <label>Chunk size<input id="chunk" type="number" value="20" min="1" max="244"></label>
+      <label>Delay (ms)<input id="delay" type="number" value="12" min="0" max="200"></label>
+    </div>
+
+    <div class="row" style="margin-bottom:12px">
+      <textarea id="text" placeholder="Text to print..." style="min-height:60px">Hello from the browser!
+PM270</textarea>
+    </div>
+    <div class="row">
+      <button id="renderText">Preview text</button>
+      <button id="printText" class="primary">Print text</button>
+      <input id="file" type="file" accept="image/*" class="hidden">
+      <button id="pickImage">Choose image&hellip;</button>
+      <button id="printImage" class="primary" disabled>Print image</button>
+    </div>
+    <div style="margin-top:12px"><canvas id="preview" width="384" height="10"></canvas></div>
+    <div style="margin-top:12px"><progress id="prog" value="0" max="1"></progress></div>
+  </div>
+
+  <div class="card" id="console" style="display:none">
+    <div class="row" style="margin-bottom:10px">
+      <input id="hex" type="text" placeholder="hex bytes, e.g. 1b213f0d0a" style="flex:1">
+      <button id="sendHex">Send</button>
+      <button id="clearLog">Clear log</button>
+    </div>
+    <div id="log"></div>
+  </div>
+</main>
+
+<script>
+"use strict";
+const SERVICE = 0xff00;
+const CH_WRITE = 0xff02;
+const CH_NOTIFY = 0xff01;
+
+const $ = (id) => document.getElementById(id);
+const log = (s) => {
+  const el = $("log");
+  el.textContent += s + "\n";
+  el.scrollTop = el.scrollHeight;
+};
+const hex = (u8) => Array.from(u8, b => b.toString(16).padStart(2, "0")).join(" ");
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+const state = {
+  device: null, server: null, service: null,
+  writeChar: null, notifyChar: null,
+  imageCanvas: null,
+};
+
+function setConnected(ok, name = "") {
+  $("dot").classList.toggle("on", ok);
+  $("devname").textContent = ok ? (name || "connected") : "not connected";
+  $("connect").disabled = ok;
+  $("disconnect").disabled = !ok;
+  $("queries").style.display = ok ? "" : "none";
+  $("printer").style.display = ok ? "" : "none";
+  $("console").style.display = ok ? "" : "none";
+}
+
+async function connect() {
+  if (!navigator.bluetooth) {
+    alert("Web Bluetooth is not available. Use Chrome/Edge on Android or desktop (HTTPS or localhost).");
+    return;
+  }
+  try {
+    log("requesting device...");
+    const device = await navigator.bluetooth.requestDevice({
+      acceptAllDevices: true,
+      optionalServices: [SERVICE],
+    });
+    device.addEventListener("gattserverdisconnected", () => {
+      log("disconnected");
+      setConnected(false);
+      state.device = null;
+    });
+    log("connecting to " + (device.name || device.id));
+    const server = await device.gatt.connect();
+    const service = await server.getPrimaryService(SERVICE);
+    const writeChar = await service.getCharacteristic(CH_WRITE);
+    let notifyChar = null;
+    try {
+      notifyChar = await service.getCharacteristic(CH_NOTIFY);
+      await notifyChar.startNotifications();
+      notifyChar.addEventListener("characteristicvaluechanged", (e) => {
+        const v = new Uint8Array(e.target.value.buffer);
+        log("<- " + hex(v));
+      });
+      log("notifications enabled on ff01");
+    } catch (e) {
+      log("notify setup failed: " + e.message);
+    }
+    Object.assign(state, { device, server, service, writeChar, notifyChar });
+    setConnected(true, device.name || device.id);
+    log("connected; mtu-dependent chunk size is configurable above");
+  } catch (e) {
+    log("connect failed: " + e.message);
+    alert("Connect failed: " + e.message);
+  }
+}
+
+async function disconnect() {
+  try { await state.device?.gatt?.disconnect(); } catch {}
+  state.device = null;
+  setConnected(false);
+}
+
+async function sendBytes(bytes, onProgress) {
+  if (!state.writeChar) throw new Error("not connected");
+  const chunk = Math.max(1, parseInt($("chunk").value, 10) || 20);
+  const delay = Math.max(0, parseInt($("delay").value, 10) || 0);
+  const noResp = state.writeChar.properties.writeWithoutResponse;
+  for (let off = 0; off < bytes.length; off += chunk) {
+    const part = bytes.slice(off, off + chunk);
+    if (noResp) await state.writeChar.writeValueWithoutResponse(part);
+    else await state.writeChar.writeValue(part);
+    if (delay) await sleep(delay);
+    if (onProgress) onProgress(off / bytes.length);
+  }
+  if (onProgress) onProgress(1);
+}
+
+async function sendText(s) {
+  const bytes = new TextEncoder().encode(s);
+  log("-> " + JSON.stringify(s));
+  await sendBytes(bytes);
+  await sleep(300);
+}
+
+// ---------------------------------------------------------------- queries
+const queries = {
+  status: () => sendBytes(new Uint8Array([0x1b, 0x21, 0x3f])),
+  battery: () => sendText("BATTERY?\r\n"),
+  config: () => sendText("CONFIG?\r\n"),
+  tag: () => sendBytes(new Uint8Array([0x1b, 0x21, 0x6f])),
+};
+
+// ------------------------------------------------------------- rasteriser
+// Returns {gray, w, h} from a canvas.
+function canvasGray(canvas) {
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  const { data, width, height } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const gray = new Uint8Array(width * height);
+  for (let i = 0, p = 0; i < data.length; i += 4, p++) {
+    gray[p] = (data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114) | 0;
+  }
+  return { gray, w: width, h: height };
+}
+
+// 1 bpp, MSB-first, row padded. 1 = white/paper, 0 = black/burn.
+function packBitmap(gray, w, h, threshold) {
+  const wbytes = Math.ceil(w / 8);
+  const raw = new Uint8Array(wbytes * h);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (gray[y * w + x] >= threshold) raw[y * wbytes + (x >> 3)] |= 0x80 >> (x & 7);
+    }
+  }
+  return { raw, wbytes };
+}
+
+function buildJob(gray, w, h, opts) {
+  const { raw, wbytes } = packBitmap(gray, w, h, opts.threshold);
+  const enc = new TextEncoder();
+  const head = enc.encode(
+    `\r\nSIZE ${opts.widthMm} mm,${opts.lengthMm} mm\r\n` +
+    `GAP ${opts.gapMm} mm,0 mm\r\n` +
+    `DIRECTION 0,0\r\n` +
+    `DENSITY ${opts.density}\r\n` +
+    `CLS\r\n` +
+    `BITMAP 0,0,${wbytes},${h},1,`
+  );
+  const tail = enc.encode(`\r\nPRINT ${opts.copies}\r\n`);
+  const out = new Uint8Array(head.length + raw.length + tail.length);
+  out.set(head, 0);
+  out.set(raw, head.length);
+  out.set(tail, head.length + raw.length);
+  return out;
+}
+
+function optsFromUI() {
+  return {
+    widthMm: parseFloat($("wmm").value) || 54,
+    lengthMm: Math.max(50, parseFloat($("length").value) || 50),
+    marginMm: Math.max(0, parseFloat($("margin").value) || 0),
+    density: parseInt($("density").value, 10) || 15,
+    threshold: parseInt($("thresh").value, 10) || 128,
+    gapMm: 0,
+    copies: 1,
+  };
+}
+
+// Compose content onto a full label canvas, leaving `marginMm` white at the
+// bottom. Shorter SIZE values make the PM270 feed continuously.
+function fitToLabel(content, o) {
+  const wdots = parseInt($("wdots").value, 10) || 384;
+  const labelH = Math.max(1, Math.round(o.lengthMm * 203 / 25.4));
+  const availH = Math.max(1, labelH - Math.round(o.marginMm * 203 / 25.4));
+  const maxContentH = Math.round(30 * 203 / 25.4);   // measured safe area
+  const safeH = Math.max(1, Math.min(availH, maxContentH));
+  const scale = Math.min(wdots / content.width, safeH / content.height, 1);
+  const dw = Math.max(1, Math.round(content.width * scale));
+  const dh = Math.max(1, Math.round(content.height * scale));
+  const label = document.createElement("canvas");
+  label.width = wdots; label.height = labelH;
+  const ctx = label.getContext("2d");
+  ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, wdots, labelH);
+  ctx.drawImage(content, (wdots - dw) >> 1, Math.max(0, (availH - dh) >> 1), dw, dh);
+  return label;
+}
+
+function showPreview(content, el) {
+  const label = fitToLabel(content, optsFromUI());
+  el.width = label.width; el.height = label.height;
+  el.getContext("2d").drawImage(label, 0, 0);
+}
+
+async function printCanvas(content) {
+  const o = optsFromUI();
+  const label = fitToLabel(content, o);
+  const { gray, w, h } = canvasGray(label);
+  const job = buildJob(gray, w, h, o);
+  log(`job: ${w}x${h}px, ${job.length} bytes, ${Math.ceil(job.length / (parseInt($("chunk").value,10)||20))} writes`);
+  await sendBytes(job, (p) => { $("prog").value = p; });
+  log("job sent");
+}
+
+// ------------------------------------------------------------------- text
+function renderText() {
+  const w = parseInt($("wdots").value, 10) || 384;
+  const lines = $("text").value.split("\n").slice(0, 20);
+  const fontSize = Math.max(16, Math.round(w / 8));
+  const lineH = Math.round(fontSize * 1.35);
+  const pad = Math.round(w / 32);
+  const h = Math.max(lineH, lines.length * lineH) + pad * 2;
+
+  const c = document.createElement("canvas");
+  c.width = w; c.height = h;
+  const ctx = c.getContext("2d");
+  ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, w, h);
+  ctx.fillStyle = "#000";
+  ctx.textBaseline = "top";
+  ctx.font = `bold ${fontSize}px system-ui, sans-serif`;
+  lines.forEach((line, i) => ctx.fillText(line, pad, pad + i * lineH));
+
+  const pv = $("preview");
+  showPreview(c, pv);
+  state.textCanvas = c;
+}
+
+function loadImage(file) {
+  const img = new Image();
+  img.onload = () => {
+    const w = parseInt($("wdots").value, 10) || 384;
+    const h = Math.max(1, Math.round(img.height * w / img.width));
+    const c = document.createElement("canvas");
+    c.width = w; c.height = h;
+    const ctx = c.getContext("2d");
+    ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, w, h);
+    ctx.drawImage(img, 0, 0, w, h);
+    const pv = $("preview");
+    showPreview(c, pv);
+    state.imageCanvas = c;
+    $("printImage").disabled = false;
+    URL.revokeObjectURL(img.src);
+  };
+  img.src = URL.createObjectURL(file);
+}
+
+// ------------------------------------------------------------------ wiring
+$("connect").onclick = connect;
+$("disconnect").onclick = disconnect;
+document.querySelectorAll("[data-q]").forEach(b => {
+  b.onclick = async () => {
+    $("qout").textContent = "sent " + b.dataset.q + "...";
+    try { await queries[b.dataset.q](); } catch (e) { $("qout").textContent = e.message; }
+  };
+});
+$("renderText").onclick = renderText;
+$("printText").onclick = async () => {
+  renderText();
+  if (state.textCanvas) await printCanvas(state.textCanvas);
+};
+$("pickImage").onclick = () => $("file").click();
+$("file").onchange = (e) => e.target.files[0] && loadImage(e.target.files[0]);
+$("printImage").onclick = async () => {
+  if (state.imageCanvas) await printCanvas(state.imageCanvas);
+};
+$("sendHex").onclick = async () => {
+  const s = $("hex").value.replace(/[^0-9a-fA-F]/g, "");
+  if (s.length % 2) return alert("odd number of hex digits");
+  const bytes = new Uint8Array(s.match(/../g).map(x => parseInt(x, 16)));
+  log("-> " + hex(bytes));
+  try { await sendBytes(bytes); } catch (e) { log("send failed: " + e.message); }
+};
+$("clearLog").onclick = () => { $("log").textContent = ""; };
+
+renderText();
+log("ready. click Connect printer.");
+</script>
+</body>
+</html>

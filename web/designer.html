@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PM270 Label Designer</title>
+<link rel="stylesheet" href="designer.css?v=3">
+</head>
+<body>
+
+<header>
+  <div class="brand">PM270 <span>Label Designer</span></div>
+  <div class="conn">
+    <button id="connect" class="primary">Connect printer</button>
+    <button id="disconnect" disabled>Disconnect</button>
+    <span id="connState" class="state">not connected</span>
+  </div>
+  <div class="acts">
+    <button id="undo" title="Ctrl+Z">Undo</button>
+    <button id="redo" title="Ctrl+Shift+Z">Redo</button>
+    <button id="previewBtn">Preview</button>
+    <button id="print" class="primary" disabled>Print</button>
+  </div>
+</header>
+
+<main>
+  <aside class="tools">
+    <h3>Add</h3>
+    <div class="toolGrid">
+      <button data-add="text">Text</button>
+      <button data-add="rect">Box</button>
+      <button data-add="line">Line</button>
+      <button data-add="image">Image</button>
+      <button data-add="barcode">Barcode</button>
+      <button data-add="qr">QR code</button>
+    </div>
+
+    <h3>Label</h3>
+    <div class="field"><label>Width (mm)</label><input id="widthMm" type="number" value="54" min="10" max="54" step="1"></div>
+    <div class="field"><label>Head dots</label><input id="headDots" type="number" value="384" min="8" max="384" step="8"></div>
+    <div class="field"><label>Density (1–15)</label><input id="density" type="number" value="15" min="1" max="15"></div>
+    <div class="field"><label>Extra margin (mm)</label><input id="marginMm" type="number" value="0" min="0" max="80" step="1"></div>
+    <div class="field row"><label for="dither">Dither photos</label><input id="dither" type="checkbox"></div>
+    <div class="hint">Exact mode-8 printing. Labels over 50 mm are split into equal strips of at most 50 mm.</div>
+
+    <h3>Repeat</h3>
+    <div class="field"><label>Copies per strip</label><input id="repeat" type="number" value="1" min="1" max="50"></div>
+    <div class="field"><label>Gap between copies (mm)</label><input id="gapMm" type="number" value="2" min="0" max="50"></div>
+    <div class="toolGrid"><button id="fit50">Fit to 50 mm</button></div>
+    <div class="hint">Edit the top copy; the copies repeat below it.</div>
+
+    <div id="sizeReadout" class="readout">—</div>
+    <div class="hint" id="wsHint"></div>
+
+    <div class="hr"></div>
+    <div class="toolGrid">
+      <button id="clear">Clear</button>
+      <button id="saveTpl">Save</button>
+      <button id="loadTpl">Load</button>
+      <button id="showAll">Show all ports</button>
+    </div>
+    <div class="hint">Pair the PM270 in your OS Bluetooth settings first. Web Serial needs Chrome/Edge 117+ or Chrome Android 138+ on HTTPS or localhost.</div>
+  </aside>
+
+  <section class="stage" id="stage">
+    <div class="canvasBox" id="canvasBox">
+      <canvas id="editor"></canvas>
+    </div>
+  </section>
+
+  <aside class="inspector">
+    <h3>Properties</h3>
+    <div id="props" class="props"><div class="empty">Select an object on the canvas.</div></div>
+    <div class="hr"></div>
+    <h3>Layers</h3>
+    <div id="layers" class="layers"></div>
+  </aside>
+</main>
+
+<input id="imageFile" type="file" accept="image/*" hidden>
+<div id="previewModal" class="modal hidden">
+  <div class="modalBox">
+    <div class="modalHead"><b>Print preview</b><button id="closePreview">Close</button></div>
+    <canvas id="previewCanvas"></canvas>
+    <div id="previewInfo" class="hint" style="white-space:pre-wrap"></div>
+  </div>
+</div>
+<div id="toast"></div>
+
+<script src="vendor/JsBarcode.all.min.js"></script>
+<script src="vendor/qrcode.min.js"></script>
+<script src="designer.js?v=3"></script>
+</body>
+</html>

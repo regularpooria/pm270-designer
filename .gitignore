@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Bluetooth captures can contain device names, addresses and app payloads.
+*.pcapng
+*.pklg
+*.snoop
+captures/
+web/btsnoop_hci.log
+
+# Local test artifacts
+_site/

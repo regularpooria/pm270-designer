@@ -1,0 +1,14 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pm270"
+version = "0.2.0"
+description = "Nelko PM270 / P21-family thermal printer driver (Classic Bluetooth SPP)"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["Pillow>=9"]
+
+[tool.setuptools]
+py-modules = ["pm270"]

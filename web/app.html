@@ -1,0 +1,330 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PM270 Printer</title>
+<style>
+  :root { color-scheme: dark; --bg:#0e1116; --card:#171c24; --line:#2a3240;
+          --fg:#e6edf3; --muted:#8b98a9; --accent:#4da3ff; --ok:#3fb950; --err:#f85149; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:15px/1.45 system-ui,sans-serif; background:var(--bg); color:var(--fg); }
+  main { max-width: 760px; margin: 0 auto; padding: 18px 14px 64px; }
+  header { display:flex; align-items:center; gap:10px; margin-bottom:14px; }
+  h1 { font-size:1.25rem; margin:0; flex:1; }
+  .dot { width:10px; height:10px; border-radius:50%; background:#555; }
+  .dot.on { background:var(--ok); box-shadow:0 0 8px var(--ok); }
+  .dot.err { background:var(--err); }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px; margin:12px 0; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  button { background:#232c38; color:var(--fg); border:1px solid var(--line); border-radius:8px;
+           padding:9px 13px; font:inherit; cursor:pointer; }
+  button.primary { background:var(--accent); color:#06121f; border-color:var(--accent); font-weight:600; }
+  button:disabled { opacity:.45; cursor:not-allowed; }
+  input, textarea, select { background:#0b0f14; color:var(--fg); border:1px solid var(--line);
+           border-radius:8px; padding:8px 10px; font:inherit; }
+  textarea { width:100%; min-height:90px; }
+  label { color:var(--muted); font-size:12px; display:flex; flex-direction:column; gap:4px; }
+  label input { width:110px; }
+  .tabs { display:flex; gap:6px; margin-bottom:10px; }
+  .tabs button { flex:1; }
+  .tabs button.active { border-color:var(--accent); color:var(--accent); }
+  .pane { display:none; }
+  .pane.active { display:block; }
+  canvas { max-width:100%; background:#fff; border:1px solid var(--line); border-radius:8px; }
+  #log { font-family:ui-monospace,monospace; font-size:12px; background:#080b0f; border:1px solid var(--line);
+         border-radius:8px; padding:10px; height:180px; overflow:auto; white-space:pre-wrap; }
+  .muted { color:var(--muted); }
+  .hidden { display:none; }
+  #toast { position:fixed; left:50%; bottom:22px; transform:translateX(-50%);
+           background:#232c38; border:1px solid var(--line); padding:10px 16px; border-radius:99px;
+           opacity:0; transition:opacity .2s; pointer-events:none; }
+  #toast.show { opacity:1; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div class="dot" id="dot"></div>
+    <h1>PM270 Printer</h1>
+    <span id="state" class="muted">checking&hellip;</span>
+  </header>
+
+  <div class="card">
+    <div class="row">
+      <label>Head dots<input id="wdots" type="number" value="384" min="8" max="384" step="8"></label>
+      <label>Label mm<input id="wmm" type="number" value="54" step="1"></label>
+      <label>Density<input id="density" type="number" value="15" min="1" max="15"></label>
+      <label>Threshold<input id="thresh" type="number" value="128" min="0" max="255"></label>
+      <label>Length mm<input id="length" type="number" value="50" min="1" step="1"></label>
+      <label style="flex-direction:row;align-items:center;gap:6px;align-self:flex-end;padding-bottom:9px">
+        <input id="short" type="checkbox" style="width:auto"> Exact 13&ndash;50 mm
+      </label>
+      <label>Margin mm<input id="margin" type="number" value="10" min="0" step="1"></label>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="tabs">
+      <button data-tab="text" class="active">Text</button>
+      <button data-tab="image">Image</button>
+      <button data-tab="debug">Debug</button>
+    </div>
+
+    <div class="pane active" id="pane-text">
+      <textarea id="text">Hello from the web!
+PM270</textarea>
+      <div class="row" style="margin-top:8px">
+        <button id="previewText">Preview</button>
+        <button id="printText" class="primary">Print text</button>
+      </div>
+      <div style="margin-top:12px"><canvas id="preview" width="384" height="10"></canvas></div>
+    </div>
+
+    <div class="pane" id="pane-image">
+      <div class="row">
+        <input id="file" type="file" accept="image/*">
+        <button id="printImage" class="primary" disabled>Print image</button>
+      </div>
+      <div style="margin-top:12px"><canvas id="imgPreview" width="384" height="10"></canvas></div>
+    </div>
+
+    <div class="pane" id="pane-debug">
+      <div class="row" style="margin-bottom:10px">
+        <button data-q="status">Status</button>
+        <button data-q="battery">Battery</button>
+        <button data-q="config">Config</button>
+        <button data-q="tag">Roll tag</button>
+      </div>
+      <div class="row" style="margin-bottom:10px">
+        <input id="hex" type="text" placeholder="hex bytes" style="flex:1">
+        <button id="sendHex">Send raw</button>
+      </div>
+      <div id="log"></div>
+      <pre id="qout" class="muted" style="white-space:pre-wrap; margin:10px 0 0"></pre>
+    </div>
+  </div>
+</main>
+<div id="toast"></div>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const log = (s) => { $("log").textContent += s + "\n"; $("log").scrollTop = 1e9; };
+const hex = (u8) => Array.from(u8, b => b.toString(16).padStart(2, "0")).join(" ");
+
+function toast(msg, ms = 1800) {
+  const t = $("toast"); t.textContent = msg; t.classList.add("show");
+  setTimeout(() => t.classList.remove("show"), ms);
+}
+
+async function api(path, opts) {
+  const r = await fetch(path, opts);
+  const j = await r.json().catch(() => ({ ok: false, error: "bad json" }));
+  if (!r.ok || !j.ok) throw new Error(j.error || `HTTP ${r.status}`);
+  return j;
+}
+
+async function health() {
+  try {
+    const h = await api("/api/health");
+    $("dot").className = "dot on";
+    $("state").textContent = h.connected ? "printer connected" : "bridge ready";
+  } catch (e) {
+    $("dot").className = "dot err";
+    $("state").textContent = "bridge offline";
+  }
+}
+setInterval(health, 3000); health();
+
+// ------------------------------------------------------------- rasteriser
+function canvasGray(canvas) {
+  const { data, width, height } = canvas.getContext("2d", { willReadFrequently: true })
+    .getImageData(0, 0, canvas.width, canvas.height);
+  const gray = new Uint8Array(width * height);
+  for (let i = 0, p = 0; i < data.length; i += 4, p++)
+    gray[p] = (data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114) | 0;
+  return { gray, w: width, h: height };
+}
+
+function buildJob(gray, w, h, o) {
+  const wbytes = Math.ceil(w / 8);
+  const enc = new TextEncoder();
+
+  if (o.short) {
+    // Captured Nelko app short-label shape: PRINT before BITMAP, mode 8 =
+    // 4 bpp (two dots/byte, high nibble first, 0x0 black / 0xF white).
+    const raw = new Uint8Array(wbytes * h * 4);
+    const nib = (v) => Math.max(0, Math.min(15, Math.round(v * 15 / 255)));
+    for (let y = 0; y < h; y++)
+      for (let x = 0; x < w; x += 2)
+        raw[y * wbytes * 4 + (x >> 1)] =
+          (nib(gray[y * w + x]) << 4) | (x + 1 < w ? nib(gray[y * w + x + 1]) : 15);
+    const head = enc.encode(
+      `SIZE ${o.widthMm} mm,${h / 8} mm\r\nGAP 0,0\r\n` +
+      `DIRECTION 0,0\r\nDENSITY ${o.density}\r\nCLS\r\n` +
+      `PRINT 1,1\r\nBITMAP 0,0,${wbytes},${h},8,`);
+    const tail = enc.encode(`\r\n`);
+    const out = new Uint8Array(head.length + raw.length + tail.length);
+    out.set(head, 0); out.set(raw, head.length); out.set(tail, head.length + raw.length);
+    return out;
+  }
+
+  const raw = new Uint8Array(wbytes * h);
+  for (let y = 0; y < h; y++)
+    for (let x = 0; x < w; x++)
+      if (gray[y * w + x] >= o.threshold) raw[y * wbytes + (x >> 3)] |= 0x80 >> (x & 7);
+  const head = enc.encode(
+    `\r\nSIZE ${o.widthMm} mm,${o.lengthMm} mm\r\nGAP 0 mm,0 mm\r\n` +
+    `DIRECTION 0,0\r\nDENSITY ${o.density}\r\nCLS\r\n` +
+    `BITMAP 0,0,${wbytes},${h},1,`);
+  const tail = enc.encode(`\r\nPRINT 1\r\n`);
+  const out = new Uint8Array(head.length + raw.length + tail.length);
+  out.set(head, 0); out.set(raw, head.length); out.set(tail, head.length + raw.length);
+  return out;
+}
+
+function opts() {
+  const short = $("short").checked;
+  const len = parseFloat($("length").value) || (short ? 20 : 50);
+  return {
+    short,
+    widthMm: parseFloat($("wmm").value) || 54,
+    lengthMm: short ? Math.min(50, Math.max(13, len)) : Math.max(50, len),
+    marginMm: Math.max(0, parseFloat($("margin").value) || 0),
+    density: parseInt($("density").value, 10) || 15,
+    threshold: parseInt($("thresh").value, 10) || 128,
+  };
+}
+
+// Place arbitrary content on a full 50 mm label canvas, keeping `marginMm`
+// of white space at the bottom so the print clears the tear bar.
+function fitToLabel(content) {
+  const o = opts();
+  const wdots = Math.min(384, Math.max(8, Math.round((parseInt($("wdots").value, 10) || 384) / 8) * 8));
+  const labelH = Math.max(1, Math.round(o.lengthMm * 8));
+  const availH = Math.max(1, labelH - (o.short ? 0 : Math.round(o.marginMm * 8)));
+  const maxContentH = o.short ? availH : Math.round(30 * 8);   // measured safe area
+  const safeH = Math.max(1, Math.min(availH, maxContentH));
+  const scale = Math.min(wdots / content.width, safeH / content.height, 1);
+  const dw = Math.max(1, Math.round(content.width * scale));
+  const dh = Math.max(1, Math.round(content.height * scale));
+
+  const label = document.createElement("canvas");
+  label.width = wdots; label.height = labelH;
+  const ctx = label.getContext("2d");
+  ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, wdots, labelH);
+  ctx.drawImage(content, (wdots - dw) >> 1, Math.max(0, (availH - dh) >> 1), dw, dh);
+  return label;
+}
+
+function showPreview(content, canvasEl) {
+  const label = fitToLabel(content);
+  canvasEl.width = label.width; canvasEl.height = label.height;
+  canvasEl.getContext("2d").drawImage(label, 0, 0);
+}
+
+async function sendJob(job) {
+  log(`sending ${job.length} bytes...`);
+  toast("Printing…");
+  const t0 = performance.now();
+  const r = await api("/api/print", {
+    method: "POST",
+    headers: { "Content-Type": "application/octet-stream" },
+    body: job,
+  });
+  log(`ok: ${r.bytes} bytes, ${r.ms} ms`);
+  toast("Printed");
+  return r;
+}
+
+// ------------------------------------------------------------------- text
+function renderText() {
+  const w = parseInt($("wdots").value, 10) || 384;
+  const lines = $("text").value.split("\n").slice(0, 20);
+  const fs = Math.max(16, Math.round(w / 8));
+  const lh = Math.round(fs * 1.35);
+  const pad = Math.round(w / 32);
+  const h = Math.max(lh, lines.length * lh) + pad * 2;
+
+  const c = document.createElement("canvas");
+  c.width = w; c.height = h;
+  const ctx = c.getContext("2d");
+  ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, w, h);
+  ctx.fillStyle = "#000"; ctx.textBaseline = "top";
+  ctx.font = `bold ${fs}px system-ui, sans-serif`;
+  lines.forEach((line, i) => ctx.fillText(line, pad, pad + i * lh));
+
+  const pv = $("preview");
+  showPreview(c, pv);
+  return c;
+}
+
+// ------------------------------------------------------------------ image
+function loadImage(file) {
+  const img = new Image();
+  img.onload = () => {
+    const w = parseInt($("wdots").value, 10) || 384;
+    const h = Math.max(1, Math.round(img.height * w / img.width));
+    const c = document.createElement("canvas");
+    c.width = w; c.height = h;
+    const ctx = c.getContext("2d");
+    ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, w, h);
+    ctx.drawImage(img, 0, 0, w, h);
+    const pv = $("imgPreview");
+    showPreview(c, pv);
+    state.imageCanvas = c;
+    $("printImage").disabled = false;
+    URL.revokeObjectURL(img.src);
+  };
+  img.src = URL.createObjectURL(file);
+}
+
+const state = { imageCanvas: null };
+
+async function printCanvas(content) {
+  const label = fitToLabel(content);
+  const { gray, w, h } = canvasGray(label);
+  await sendJob(buildJob(gray, w, h, opts()));
+}
+
+// ------------------------------------------------------------------ wiring
+document.querySelectorAll(".tabs button").forEach(b => {
+  b.onclick = () => {
+    document.querySelectorAll(".tabs button").forEach(x => x.classList.toggle("active", x === b));
+    document.querySelectorAll(".pane").forEach(p => p.classList.toggle("active", p.id === "pane-" + b.dataset.tab));
+  };
+});
+$("previewText").onclick = renderText;
+$("printText").onclick = async () => {
+  try { await printCanvas(renderText()); } catch (e) { log("error: " + e.message); toast("Error: " + e.message, 4000); }
+};
+$("file").onchange = (e) => e.target.files[0] && loadImage(e.target.files[0]);
+$("printImage").onclick = async () => {
+  try { if (state.imageCanvas) await printCanvas(state.imageCanvas); }
+  catch (e) { log("error: " + e.message); toast("Error: " + e.message, 4000); }
+};
+document.querySelectorAll("[data-q]").forEach(b => {
+  b.onclick = async () => {
+    try {
+      const r = await api("/api/query?cmd=" + b.dataset.q);
+      $("qout").textContent = JSON.stringify(r, null, 2);
+      log(`query ${b.dataset.q}: ${JSON.stringify(r)}`);
+    } catch (e) { $("qout").textContent = e.message; toast(e.message, 4000); }
+  };
+});
+$("sendHex").onclick = async () => {
+  const s = $("hex").value.replace(/[^0-9a-fA-F]/g, "");
+  if (!s || s.length % 2) return toast("need an even number of hex digits");
+  const bytes = new Uint8Array(s.match(/../g).map(x => parseInt(x, 16)));
+  try {
+    await api("/api/raw", { method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: bytes });
+    toast("sent"); log("raw -> " + hex(bytes));
+  } catch (e) { toast(e.message, 4000); }
+};
+
+renderText();
+log("ready");
+</script>
+</body>
+</html>
