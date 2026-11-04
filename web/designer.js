@@ -787,7 +787,7 @@ function loadTemplate() {
 function updateReadout() {
   const designMm = contentBottom() / DOTS_PER_MM;
   const copies = Math.max(1, Math.floor(state.repeat || 1));
-  const mode = state.lengthDots <= EXACT_MAX_ROWS ? "exact mode 8 / 4bpp" : "classic 1bpp";
+  const mode = state.lengthDots < EXACT_BELOW_ROWS ? "exact mode 8 / 4bpp" : "classic 1bpp";
   els.sizeReadout.innerHTML =
     `<b>${state.widthMm} × ${state.lengthMm.toFixed(2)} mm</b> · ${state.lengthDots} dots<br>` +
     `design ${designMm.toFixed(1)} mm × ${copies} · gap ${state.gapMm} mm · extra ${state.marginMm} mm<br>` +
@@ -1105,12 +1105,12 @@ function buildClassicJob(canvas) {
 }
 
 // The app's captured 52 mm mode-8 job works, but the original 1 bpp path is
-// what printed long labels reliably. Use exact mode 8 up to 50 mm (400 dots)
+// what printed long labels reliably. Use exact mode 8 below 50 mm
 // and fall back to the classic 1 bpp job above that. No length cap, no split.
-const EXACT_MAX_ROWS = 400;
+const EXACT_BELOW_ROWS = 400;
 
 function buildJob(canvas) {
-  return canvas.height <= EXACT_MAX_ROWS ? buildExactJob(canvas) : buildClassicJob(canvas);
+  return canvas.height < EXACT_BELOW_ROWS ? buildExactJob(canvas) : buildClassicJob(canvas);
 }
 
 async function printLabel() {
@@ -1145,7 +1145,7 @@ function showPreview() {
   const raw = new TextDecoder("ascii").decode(job.slice(0, 240));
   const bitmapAt = raw.indexOf("BITMAP");
   const head = bitmapAt >= 0 ? raw.slice(0, bitmapAt + 24) : raw;
-  const path = c.height <= EXACT_MAX_ROWS ? "exact mode 8 / 4bpp" : "classic 1bpp / mode 0";
+  const path = c.height < EXACT_BELOW_ROWS ? "exact mode 8 / 4bpp" : "classic 1bpp / mode 0";
   $("previewInfo").textContent =
     `${c.width}×${c.height} dots · SIZE ${state.widthMm} × ${state.lengthMm.toFixed(2)} mm · ` +
     `${copies} cop${copies === 1 ? "y" : "ies"}\n` +
